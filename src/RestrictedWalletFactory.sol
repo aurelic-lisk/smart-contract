@@ -1,116 +1,137 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {
+    ReentrancyGuard
+} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./RestrictedWallet.sol";
 
 /**
- * @title RestrictedWalletFactory
- * @notice Factory for creating RestrictedWallets for Aurelic PoC
- * - Only one wallet per borrower, created by LoanManager
- * - getOrCreateWallet returns existing or creates new wallet
+ * @title RestrictedWalletFactory - Velodrome Integration
+ * @notice Factory for creating RestrictedWallets with Velodrome  AMM
  */
 contract RestrictedWalletFactory is ReentrancyGuard {
+    // ============ IMMUTABLES ============
+
+    address public immutable veloRouter;
+    address public immutable poolFactory;
+    address public immutable loanManager;
+
+    // ============ STATE VARIABLES ============
+
+    address[] private whitelistedTokens;
     mapping(address => address) public userWallet;
     address[] public wallets;
-    address public loanManager;
+
+    // ============ EVENTS ============
 
     event WalletCreated(address indexed user, address indexed wallet);
 
+    // ============ CONSTRUCTOR ============
+
     /**
-     * @notice Constructor
+     * @notice Initialize factory with Velodrome contracts
+     * @param _veloRouter Velodrome Router address
+     * @param _poolFactory Velodrome PoolFactory address
      * @param _loanManager LoanManager address
+     * @param _whitelistedTokens Initial token whitelist
      */
-    constructor(address _loanManager) {
+    constructor(
+        address _veloRouter,
+        address _poolFactory,
+        address _loanManager,
+        address[] memory _whitelistedTokens
+    ) {
+        require(_veloRouter != address(0), "Invalid router");
+        require(_poolFactory != address(0), "Invalid factory");
+        require(_loanManager != address(0), "Invalid loan manager");
+
+        veloRouter = _veloRouter;
+        poolFactory = _poolFactory;
         loanManager = _loanManager;
+        whitelistedTokens = _whitelistedTokens;
     }
 
-    /**
-     * @notice Update the LoanManager address
-     */
-    function setLoanManager(address _loanManager) external {
-        require(loanManager == address(0x1) || msg.sender == loanManager, "Not authorized");
-        require(_loanManager != address(0), "Invalid loan manager address");
-        loanManager = _loanManager;
-    }
+    // ============ FACTORY FUNCTIONS ============
 
     /**
-     * @notice Create a restricted wallet for a borrower (only LoanManager)
+     * @notice Create wallet for borrower (only LoanManager)
      * @param borrower Borrower address
-     * @return wallet Address of the created wallet
+     * @return wallet Address of created wallet
      */
-    function createWallet(address borrower) external nonReentrant returns (address wallet) {
+    function createWallet(
+        address borrower
+    ) external nonReentrant returns (address wallet) {
         require(msg.sender == loanManager, "Only loan manager");
-        require(borrower != address(0), "Invalid borrower address");
-        require(userWallet[borrower] == address(0), "Wallet already exists");
+        require(borrower != address(0), "Invalid borrower");
+        require(userWallet[borrower] == address(0), "Wallet exists");
+
+        // FIX: Pass whitelist to constructor
         RestrictedWallet newWallet = new RestrictedWallet(
             borrower,
-            0x492E6456D9528771018DeB9E87ef7750EF184104, // Universal Router
-            0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408, // Pool Manager
-            0x000000000022D473030F116dDEE9F6B43aC78BA3, // Permit2
-            loanManager // Loan Manager
+            veloRouter,
+            poolFactory,
+            loanManager,
+            whitelistedTokens
         );
-        userWallet[borrower] = address(newWallet);
-        wallets.push(address(newWallet));
-        emit WalletCreated(borrower, address(newWallet));
-        return address(newWallet);
+
+        wallet = address(newWallet);
+        userWallet[borrower] = wallet;
+        wallets.push(wallet);
+
+        emit WalletCreated(borrower, wallet);
     }
 
     /**
-     * @notice Get existing wallet or create new one for borrower (only LoanManager)
+     * @notice Get existing wallet or create new one (only LoanManager)
      * @param borrower Borrower address
-     * @return wallet Address of the wallet
+     * @return wallet Address of wallet
      */
-    function getOrCreateWallet(address borrower) external nonReentrant returns (address wallet) {
+    function getOrCreateWallet(
+        address borrower
+    ) external nonReentrant returns (address wallet) {
         require(msg.sender == loanManager, "Only loan manager");
-        require(borrower != address(0), "Invalid borrower address");
+        require(borrower != address(0), "Invalid borrower");
+
         if (userWallet[borrower] != address(0)) {
             return userWallet[borrower];
         }
+
+        // FIX: Pass whitelist to constructor
         RestrictedWallet newWallet = new RestrictedWallet(
             borrower,
-            0x492E6456D9528771018DeB9E87ef7750EF184104, // Universal Router
-            0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408, // Pool Manager
-            0x000000000022D473030F116dDEE9F6B43aC78BA3, // Permit2
-            loanManager // Loan Manager
+            veloRouter,
+            poolFactory,
+            loanManager,
+            whitelistedTokens
         );
-        userWallet[borrower] = address(newWallet);
-        wallets.push(address(newWallet));
-        emit WalletCreated(borrower, address(newWallet));
-        return address(newWallet);
+
+        wallet = address(newWallet);
+        userWallet[borrower] = wallet;
+        wallets.push(wallet);
+
+        emit WalletCreated(borrower, wallet);
     }
 
-    /**
-     * @notice Get wallet address for a borrower
-     * @param borrower Borrower address
-     * @return wallet Wallet address (0x0 if no wallet exists)
-     */
-    function getWallet(address borrower) external view returns (address wallet) {
+    // ============ VIEW FUNCTIONS ============
+
+    function getWallet(address borrower) external view returns (address) {
         return userWallet[borrower];
     }
 
-    /**
-     * @notice Check if borrower has a wallet
-     * @param borrower Borrower address
-     * @return exists True if wallet exists
-     */
-    function hasWallet(address borrower) external view returns (bool exists) {
+    function hasWallet(address borrower) external view returns (bool) {
         return userWallet[borrower] != address(0);
     }
 
-    /**
-     * @notice Get all created wallet addresses
-     * @return allWallets Array of all wallet addresses
-     */
-    function getAllWallets() external view returns (address[] memory allWallets) {
+    function getAllWallets() external view returns (address[] memory) {
         return wallets;
     }
 
-    /**
-     * @notice Get total number of wallets created
-     * @return count Total wallet count
-     */
-    function getWalletCount() external view returns (uint256 count) {
+    function getWalletCount() external view returns (uint256) {
         return wallets.length;
+    }
+
+    function getWhitelistedTokens() external view returns (address[] memory) {
+        return whitelistedTokens;
     }
 }
